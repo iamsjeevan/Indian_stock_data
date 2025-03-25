@@ -1,0 +1,10 @@
+requests
+pandas
+yfinance
+alpha_vantage
+finnhub-python
+twelvedata
+fmp_python
+newsapi-python
+tqdm
+json
