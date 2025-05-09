@@ -295,18 +295,40 @@ def process_stock_folders(main_data_folder, stocks_to_process_tickers=None):
 
 
 # --- Main Execution (Test with 10 stocks) ---
+# --- Main Execution (Test with tickers from ticker.txt) ---
 if __name__ == "__main__":
     main_folder = "stock_data"
+    ticker_file = "ticker.txt" # Name of your ticker file
+
     if not os.path.isdir(main_folder):
         print(f"Default folder '{main_folder}' not found.")
         custom_path = input(f"Enter full path to stock data folder: ")
         if os.path.isdir(custom_path): main_folder = custom_path
         else: print(f"Path '{custom_path}' invalid. Exiting."); exit()
+
+    # --- Read tickers from ticker.txt ---
+    test_tickers = []
+    if os.path.exists(ticker_file):
+        try:
+            with open(ticker_file, 'r') as f:
+                test_tickers = [line.strip() for line in f if line.strip()] # Read and strip whitespace/newlines
+            if not test_tickers:
+                print(f"Warning: '{ticker_file}' is empty or contains no valid tickers.")
+            else:
+                print(f"Read {len(test_tickers)} tickers from '{ticker_file}': {test_tickers[:5]}...") # Print first 5
+        except Exception as e:
+            print(f"Error reading '{ticker_file}': {e}")
+    else:
+        print(f"Ticker file '{ticker_file}' not found. Please create it with one ticker per line.")
+        # Optionally, fall back to a default list or exit
+        # test_tickers = ["RELIANCE", "INFY"] # Example fallback
+        # exit()
+
+
+    if not test_tickers: # If no tickers were read or file not found
+        print("No tickers to process. Exiting.")
+        exit()
     
-    test_tickers = [ # Your folder names should be these tickers
-        "CUMMINSIND", "ABSLAMC", "RELIANCE", "INFY", "TCS", 
-        "HDFCBANK", "ICICIBANK", "KOTAKBANK", "AXISBANK", "SBIN" 
-    ]
     print("\nSetting up dummy folders for testing (if they don't exist)...")
     for stock_ticker in test_tickers:
         dummy_folder_path = os.path.join(main_folder, stock_ticker)
@@ -314,5 +336,11 @@ if __name__ == "__main__":
             try: os.makedirs(dummy_folder_path); print(f"Created dummy folder: {dummy_folder_path}")
             except OSError as e: print(f"Error creating dummy folder {dummy_folder_path}: {e}")
     
-    print("\n--- RUNNING TEST SCRIPT FOR LIMITED STOCKS (Using API for sc_id with link_src priority) ---")
+    print(f"\n--- RUNNING TEST SCRIPT FOR {len(test_tickers)} STOCKS FROM '{ticker_file}' (Using API for sc_id) ---")
     process_stock_folders(main_folder, stocks_to_process_tickers=test_tickers)
+
+    # --- TO RUN FOR ALL STOCKS LATER (after testing and ensuring ticker.txt has all 500) ---
+    # print(f"\n--- RUNNING SCRIPT FOR ALL STOCKS FROM '{ticker_file}' ---")
+    # process_stock_folders(main_folder, stocks_to_process_tickers=test_tickers) # if ticker.txt contains all
+    # OR to process all folders irrespective of ticker.txt:
+    # process_stock_folders(main_folder)
