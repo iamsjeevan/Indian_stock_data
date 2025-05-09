@@ -321,7 +321,11 @@ def process_stock_folders(main_data_folder, stocks_to_process_tickers=None):
 # --- Main Execution ---
 if __name__ == "__main__":
     main_folder = "stock_data"
+
     ticker_file = "failed_ticker.txt" # Using your specified filename
+
+    ticker_file = "kushal_tickers.txt" # Using your specified filename
+
 
     # PySocks check is not strictly necessary if not using SOCKS proxies, but harmless to keep
     try:
