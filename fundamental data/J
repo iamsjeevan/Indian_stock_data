@@ -1,0 +1,15 @@
+curl 'https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php?classic=true&query=ABSLAMC&type=1&format=json&callback=suggest1' \
+  -H 'accept: text/javascript, application/javascript, application/ecmascript, application/x-ecmascript, */*; q=0.01' \
+  -H 'accept-language: en-US,en;q=0.7' \
+  -b 'MC_PPID_LOGIC=normaluser26898158777210944mcids; A18ID=1746779480735.34015; PHPSESSID=7b0rj41shmj0at7uav9l6nlu93; nousersess=bkqybu4zp24l0th6; MC_INTERSTITIAL_WEB_DFP_AD_LOGIC_20250509={"0":"https://www.moneycontrol.com/","1":"https://www.moneycontrol.com/india/stockpricequote/refineries/relianceindustries/RI","2":"https://www.moneycontrol.com/financials/relianceindustries/balance-sheetVI/RI#RI"}; stocks=|Reliance_RI~2%7CIWML_IIFLW54277%7E1%7C' \
+  -H 'priority: u=1, i' \
+  -H 'referer: https://www.moneycontrol.com/financials/360onewam/balance-sheetVI/IIFLW54277/2' \
+  -H 'sec-ch-ua: "Chromium";v="136", "Brave";v="136", "Not.A/Brand";v="99"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"' \
+  -H 'sec-fetch-dest: empty' \
+  -H 'sec-fetch-mode: cors' \
+  -H 'sec-fetch-site: same-origin' \
+  -H 'sec-gpc: 1' \
+  -H 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36' \
+  -H 'x-requested-with: XMLHttpRequest'

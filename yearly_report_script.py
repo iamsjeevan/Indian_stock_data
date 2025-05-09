@@ -1,98 +1,70 @@
 import requests
-import json
-import time # To add delays between requests
+import time
+import json # To try and pretty-print if it's valid JSON after stripping
 
-# List of stocks with their names and BSE Scrip Codes
-stocks_to_process = [
-    {'name': 'Reliance Industries Ltd', 'scrip_code': '500325'},
-    {'name': 'Tata Consultancy Services Ltd (TCS)', 'scrip_code': '532540'},
-    {'name': 'HDFC Bank Ltd', 'scrip_code': '500180'},
-    {'name': 'Infosys Ltd', 'scrip_code': '500209'},
-    {'name': 'ICICI Bank Ltd', 'scrip_code': '532174'},
-    {'name': 'Hindustan Unilever Ltd', 'scrip_code': '500696'},
-    {'name': 'State Bank of India (SBI)', 'scrip_code': '500112'},
-    {'name': 'Bajaj Finance Ltd', 'scrip_code': '500034'},
-    {'name': 'Bharti Airtel Ltd', 'scrip_code': '532454'},
-    {'name': 'ITC Ltd', 'scrip_code': '500875'},
-    {'name': 'Larsen & Toubro Ltd (L&T)', 'scrip_code': '500510'}
-]
+# --- Configuration for API Call ---
+BASE_URL_SUGGESTION_API = "https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php"
+API_REQUEST_DELAY = 1 # Seconds between API calls
 
-# Base API URL format
-base_api_url = 'https://api.bseindia.com/BseIndiaAPI/api/AnnualReport_New/w?scripcode={}'
-
-# Common Headers (essential for the API call)
-headers = {
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
-    'Connection': 'keep-alive',
-    'Origin': 'https://www.bseindia.com',
-    'Referer': 'https://www.bseindia.com/',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-site',
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-    'sec-ch-ua': '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"',
+HEADERS_API = { # Headers from your cURL example
+    'accept': 'text/javascript, application/javascript, application/ecmascript, application/x-ecmascript, */*; q=0.01',
+    'accept-language': 'en-US,en;q=0.7',
+    'priority': 'u=1, i',
+    'referer': 'https://www.moneycontrol.com/', # General referer
+    'sec-ch-ua': '"Chromium";v="136", "Brave";v="136", "Not.A/Brand";v="99"',
     'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Linux"'
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'sec-gpc': '1',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+    'x-requested-with': 'XMLHttpRequest'
 }
 
-# Keys for JSON parsing
-report_list_key = 'Table'
-link_key = 'PDFDownload'
-
-# Loop through each stock
-for stock in stocks_to_process:
-    stock_name = stock['name']
-    scrip_code = stock['scrip_code']
-    api_url = base_api_url.format(scrip_code) # Construct the specific API URL
-
-    print(f"\n--- Processing: {stock_name} ({scrip_code}) ---")
-    print(f"Calling API: {api_url}")
-
-    pdf_links = [] # Reset links for each stock
+def fetch_and_print_api_suggestion(ticker_query, session):
+    """
+    Fetches the suggestion from Moneycontrol's API and prints the raw response.
+    """
+    params = {
+        'classic': 'true',
+        'query': ticker_query,
+        'type': '1',  # '1' seems to be for equity
+        'format': 'json',
+        'callback': 'suggest1' # This will be part of the response text
+    }
+    print(f"\n--- Fetching API suggestion for: {ticker_query} ---")
     try:
-        response = requests.get(api_url, headers=headers, timeout=20)
-        response.raise_for_status() # Check for HTTP errors
-        print("API call successful.")
+        response = session.get(BASE_URL_SUGGESTION_API, params=params, headers=HEADERS_API, timeout=10)
+        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+        
+        print(f"Status Code: {response.status_code}")
+        print("Raw Response Text:")
+        print(response.text)
+        print("--------------------------------------------------")
 
-        data = response.json() # Parse JSON response
-
-        # Extract links
-        if report_list_key in data and isinstance(data[report_list_key], list):
-            reports = data[report_list_key]
-            for report in reports:
-                if isinstance(report, dict) and link_key in report:
-                    link_url = report[link_key]
-                    if link_url and isinstance(link_url, str) and link_url.lower().endswith(('.pdf', '.zip')): # Allow for zip files too
-                        # Clean up potential stray backslashes
-                        full_link = link_url.replace('\\', '')
-                        pdf_links.append(full_link)
-
-        else:
-             print(f"Warning: Could not find key '{report_list_key}' or it's not a list in the response for {stock_name}.")
-
-    except requests.exceptions.RequestException as e:
-        print(f"API Request Error for {stock_name}: {e}")
-    except json.JSONDecodeError as e:
-        print(f"JSON Parsing Error for {stock_name}: {e}")
-        print(f"Response Text (first 500 chars): {response.text[:500]}...")
-    except KeyError as e:
-        print(f"Key Error processing {stock_name}: Could not find key '{e}'.")
+        # Optional: Try to parse and pretty print the JSON part
+        if response.text.startswith('suggest1(') and response.text.endswith(')'):
+            json_str = response.text[len('suggest1('):-1]
+            try:
+                parsed_json = json.loads(json_str)
+                print("\nParsed JSON Content (Pretty Printed):")
+                print(json.dumps(parsed_json, indent=2))
+                print("--------------------------------------------------")
+            except json.JSONDecodeError as e:
+                print(f"\nCould not parse the inner content as JSON: {e}")
+        
+    except requests.RequestException as e:
+        print(f"Request Error for '{ticker_query}': {e}")
     except Exception as e:
-        print(f"An unexpected error occurred processing {stock_name}: {e}")
+        print(f"An unexpected error occurred for '{ticker_query}': {e}")
 
-    # Print the found links for the current stock
-    if pdf_links:
-        print(f"Found PDF/ZIP Links for {stock_name}:")
-        unique_links = sorted(list(set(pdf_links))) # Remove duplicates and sort
-        for link in unique_links:
-            print(link)
-        print(f"Total unique links found: {len(unique_links)}")
-    else:
-        print(f"No valid Annual Report PDF/ZIP links found for {stock_name}.")
+# --- Main Execution ---
+if __name__ == "__main__":
+    tickers_to_check = ["AXISBANK", "KOTAKBANK"] # Stocks you want to inspect
 
-    # --- IMPORTANT: Add a delay to avoid overwhelming the server ---
-    print("Pausing for 2 seconds...")
-    time.sleep(2) # Pause for 2 seconds between requests
-
-print("\n--- Finished processing all stocks. ---")
+    with requests.Session() as session: # Use a session for potential cookie handling if needed
+        for ticker in tickers_to_check:
+            fetch_and_print_api_suggestion(ticker, session)
+            if ticker != tickers_to_check[-1]: # Add delay unless it's the last one
+                time.sleep(API_REQUEST_DELAY)
