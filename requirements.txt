@@ -7,4 +7,4 @@ twelvedata
 fmp_python
 newsapi-python
 tqdm
-json
+beautifulsoup4
