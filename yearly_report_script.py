@@ -1,136 +1,72 @@
 import requests
-import json
-import random
-import time
+import os
 
 # --- Configuration ---
-PROXY_API_URL = "https://freeapiproxies.azurewebsites.net/proxyapi"
-PROXY_API_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-    'Accept': 'application/json'
+STOCK_ID_TO_CHECK = "KSB"  # <--- Change this to the sc_id you want to inspect
+REPORT_TYPE = "balance_VI" # Or "profit", "cashflow" etc.
+OUTPUT_HTML_FILENAME = f"{STOCK_ID_TO_CHECK}_financial_page_content.html"
+
+BASE_URL_FINANCIALS = "https://www.moneycontrol.com/stocks/company_info/print_financials.php"
+
+HEADERS_FINANCIALS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.6",
+    "Connection": "keep-alive",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36", # Keep your UA updated
+    # Add other headers from your main script if you suspect they are critical for initial page load
 }
-NUMBER_OF_PROXIES_TO_TEST = 10
-TEST_URL = "https://api.ipify.org?format=json"
-PROXY_TEST_TIMEOUT = 15 # Increased timeout a bit for potentially slower SOCKS
 
-def fetch_proxies_from_api(session):
-    """Fetches a list of proxies from the PROXY_API_URL."""
-    print(f"Fetching proxy list from {PROXY_API_URL}...")
-    try:
-        response = session.get(PROXY_API_URL, headers=PROXY_API_HEADERS, timeout=10)
-        response.raise_for_status()
-        proxies_list = response.json()
-        if proxies_list and isinstance(proxies_list, list):
-            print(f"Successfully fetched {len(proxies_list)} proxies from the API.")
-            return proxies_list
-        else:
-            print("API returned no proxies or unexpected format.")
-            return []
-    except requests.exceptions.Timeout:
-        print("Proxy API request timed out.")
-        return []
-    except requests.RequestException as e:
-        print(f"Proxy API request error: {e}")
-        return []
-    except json.JSONDecodeError:
-        print(f"Proxy API response was not valid JSON: {response.text[:200] if response else 'No response text'}") # Added check for response
-        return []
-
-def test_proxy(proxy_info, session):
+def fetch_and_save_financial_page(sc_id, report_type, output_filename):
     """
-    Tests a single proxy by making a request to TEST_URL.
+    Fetches the initial financial print page for a given sc_id and report type,
+    and saves its HTML content to a file.
     """
-    ip = proxy_info.get("ip")
-    port = proxy_info.get("port")
-    proxy_type = proxy_info.get("type", "http").lower()
+    params = {'sc_did': sc_id, 'type': report_type}
+    
+    print(f"Attempting to fetch: {BASE_URL_FINANCIALS} with params: {params}")
 
-    if not ip or not port:
-        print(f"  [Invalid Data] Proxy info missing IP or Port: {proxy_info}")
-        return False
-
-    # *** MODIFIED PROXY URL FORMATTING ***
-    if proxy_type == "http" or proxy_type == "https":
-        # For HTTP/HTTPS proxies, requests library often handles the scheme correctly
-        # when you provide http:// in the proxy dict.
-        # Some systems/libraries might prefer explicit https:// if the proxy is an HTTPS proxy,
-        # but generally http://ip:port works for both http and https traffic through an HTTP proxy.
-        proxy_url_formatted = f"http://{ip}:{port}"
-    elif proxy_type == "socks4":
-        proxy_url_formatted = f"socks4://{ip}:{port}"
-    elif proxy_type == "socks5":
-        proxy_url_formatted = f"socks5://{ip}:{port}"
-    else:
-        print(f"  [Unsupported Type] Proxy type '{proxy_type}' not directly formatted for testing: {ip}:{port}.")
-        return False
-
-    proxies_for_request = {
-        "http": proxy_url_formatted,
-        "https": proxy_url_formatted
-    }
-
-    print(f"  Testing proxy: {proxy_url_formatted} (Original API type: {proxy_type})... ", end="")
     try:
-        response = session.get(TEST_URL, proxies=proxies_for_request, timeout=PROXY_TEST_TIMEOUT)
-        response.raise_for_status()
-        print(f"SUCCESS (Status: {response.status_code}, IP via proxy: {response.json().get('ip', 'N/A')})")
-        return True
+        with requests.Session() as session: # Use a session for good practice
+            session.headers.update(HEADERS_FINANCIALS)
+            response = session.get(BASE_URL_FINANCIALS, params=params, timeout=20)
+            
+            print(f"Status Code: {response.status_code}")
+            print(f"Final URL after request: {response.url}")
+
+            response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+
+            html_content = response.text
+
+            try:
+                with open(output_filename, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+                print(f"Successfully saved HTML content to: {output_filename}")
+                print(f"File size: {os.path.getsize(output_filename) / 1024:.2f} KB")
+            except IOError as e:
+                print(f"Error saving HTML to file '{output_filename}': {e}")
+
+    except requests.exceptions.HTTPError as http_err:
+        print(f"HTTP error occurred: {http_err} (Status code: {response.status_code if 'response' in locals() else 'N/A'})")
+        if 'response' in locals() and response.status_code == 404:
+            print("This might indicate the sc_id or report type is incorrect, or the page doesn't exist.")
+        # Optionally save error page content
+        if 'response' in locals() and response.text:
+             error_filename = f"{sc_id}_error_page.html"
+             try:
+                 with open(error_filename, "w", encoding="utf-8") as f_err:
+                     f_err.write(response.text)
+                 print(f"Saved error page content to: {error_filename}")
+             except IOError:
+                 pass # Ignore if can't save error page
     except requests.exceptions.Timeout:
-        print("FAILED (Timeout)")
-        return False
-    except requests.exceptions.RequestException as e:
-        error_type = type(e).__name__
-        # The "InvalidSchema" error occurs if PySocks is not installed or requests can't handle the SOCKS scheme.
-        if "InvalidSchema" in error_type:
-             print(f"FAILED ({error_type} - Is PySocks installed? 'pip install PySocks')")
-        else:
-            print(f"FAILED ({error_type})")
-        return False
-    except json.JSONDecodeError:
-        print(f"FAILED (Could not decode JSON response from test URL: {response.text[:100] if response else 'No response text'})")
-        return False
+        print("The request timed out.")
+    except requests.exceptions.RequestException as req_err:
+        print(f"An error occurred during the request: {req_err}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 
 if __name__ == "__main__":
-    # Check if PySocks is available, if not, SOCKS proxies will likely fail
-    try:
-        import socks
-        print("PySocks library found.")
-    except ImportError:
-        print("WARNING: PySocks library not found. SOCKS proxies will likely fail. Please install it: pip install PySocks")
-
-
-    with requests.Session() as session:
-        available_proxies = fetch_proxies_from_api(session)
-
-        if not available_proxies:
-            print("No proxies fetched from API. Cannot proceed with testing.")
-            exit()
-        
-        source_list_for_sampling = available_proxies
-
-        num_to_sample = min(NUMBER_OF_PROXIES_TO_TEST, len(source_list_for_sampling))
-        if num_to_sample == 0:
-            print("No proxies available to sample and test.")
-            exit()
-            
-        proxies_to_test_sample = random.sample(source_list_for_sampling, num_to_sample)
-
-        print(f"\n--- Testing {num_to_sample} randomly selected proxies ---")
-        working_proxies_count = 0
-        tested_proxies_count = 0
-
-        for proxy_info in proxies_to_test_sample:
-            tested_proxies_count += 1
-            if test_proxy(proxy_info, session):
-                working_proxies_count += 1
-            if tested_proxies_count < len(proxies_to_test_sample):
-                time.sleep(0.5) 
-
-        print("\n--- Proxy Test Summary ---")
-        print(f"Total proxies selected for testing: {num_to_sample}")
-        print(f"Number of working proxies: {working_proxies_count}")
-        print(f"Success rate: { (working_proxies_count / num_to_sample * 100) if num_to_sample > 0 else 0:.2f}%")
-
-        if working_proxies_count == 0 and num_to_sample > 0:
-            print("\nWARNING: None of the randomly tested proxies worked. The proxy source might be unreliable, or PySocks might be needed for SOCKS proxies.")
-            
+    print(f"Fetching financial page for sc_id: '{STOCK_ID_TO_CHECK}', Report Type: '{REPORT_TYPE}'")
+    fetch_and_save_financial_page(STOCK_ID_TO_CHECK, REPORT_TYPE, OUTPUT_HTML_FILENAME)
+    print("\nScript finished. Please check the generated HTML file.")
