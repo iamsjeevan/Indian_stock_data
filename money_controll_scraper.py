@@ -56,51 +56,115 @@ def get_form_params(soup):
     for inp in form.find_all('input', {'type': 'hidden'}): params[inp.get('name')] = inp.get('value')
     return params
 
+# Ensure these imports are at the top of your script if not already there
+
 def parse_financial_table_from_soup(soup, company_name, page_num_for_debug=""):
+    """
+    Parses the financial data table from a BeautifulSoup object,
+    with flexible month detection for year headers.
+    """
     all_candidate_tables = soup.find_all('table', class_='table4', width="100%", cellspacing="0", cellpadding="0", bgcolor="#ffffff")
+    
     financial_table = None
+    # print(f"DEBUG (Page {page_num_for_debug}, {company_name}): Found {len(all_candidate_tables)} candidate tables.") # Optional
+
     for idx, candidate_table in enumerate(all_candidate_tables):
-        first_few_rows = candidate_table.find_all('tr', limit=5)
+        first_few_rows = candidate_table.find_all('tr', limit=5) # Check first 5 rows
         for tr_candidate in first_few_rows:
             tds = tr_candidate.find_all('td')
-            if len(tds) > 1 and "detb" in tds[0].get('class', []) and \
-               tds[1].text.strip().startswith("Mar ") and "detb" in tds[1].get('class', []):
-                financial_table = candidate_table; break
-        if financial_table: break
-    if not financial_table: return [], []
+            if len(tds) > 1 and "detb" in tds[0].get('class', []): 
+                # Check if the second cell looks like a year header
+                if tds[1].text and re.match(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{2}$", tds[1].text.strip()):
+                    if "detb" in tds[1].get('class', []): 
+                        financial_table = candidate_table
+                        # print(f"DEBUG (Page {page_num_for_debug}, {company_name}): Identified financial table (candidate {idx}) by year headers like '{tds[1].text.strip()}'.") # Optional
+                        break
+        if financial_table:
+            break
+            
+    if not financial_table:
+        print(f"Warning (Page {page_num_for_debug}, {company_name}): Could not identify the main financial data table.")
+        return [], []
+
     rows = financial_table.find_all('tr')
-    table_data, column_headers, header_found_flag = [], [], False
+    table_data = []
+    column_headers = []
+    header_found_flag = False
+
     for i, row in enumerate(rows):
-        cols = row.find_all('td')
-        if not cols: continue
-        if not header_found_flag and len(cols) > 1 and "detb" in cols[0].get('class', []) and cols[1].text.strip().startswith("Mar "):
-            column_headers = ["Item"] + [col.text.strip() for col in cols[1:]]; header_found_flag = True; continue
-        if not header_found_flag: continue
-        if len(cols) > 1 and "12 mths" in cols[1].text.strip() and ("det" in cols[1].get('class', []) or "detb" in cols[1].get('class', [])): continue
-        if len(cols) == 1 and cols[0].get('colspan') and cols[0].find('img'): continue
+        cols = row.find_all('td') 
+        
+        if not cols:
+            continue
+
+        # --- MODIFIED HEADER DETECTION ---
+        if not header_found_flag and len(cols) > 1 and \
+           "detb" in cols[0].get('class', []): 
+            
+            first_header_cell_text = cols[1].text.strip()
+            if "detb" in cols[1].get('class', []) and \
+               re.match(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{2}$", first_header_cell_text):
+                column_headers = ["Item"] + [col.text.strip() for col in cols[1:]]
+                header_found_flag = True
+                # print(f"DEBUG (Page {page_num_for_debug}, {company_name}): Column Headers extracted: {column_headers}") # Optional
+                continue 
+        # --- END OF MODIFIED HEADER DETECTION ---
+
+        if not header_found_flag:
+            continue
+            
+        if len(cols) > 1 and "12 mths" in cols[1].text.strip() and \
+           ("det" in cols[1].get('class', []) or "detb" in cols[1].get('class', [])):
+            continue
+
+        if len(cols) == 1 and cols[0].get('colspan') and cols[0].find('img'):
+            continue
+
         first_col_classes = cols[0].get('class', [])
         item_name = cols[0].text.replace('\xa0', ' ').strip()
-        if "Source :" in item_name: break
-        if not item_name and not any(c.text.strip() for c in cols[1:] if c.text is not None): continue
-        is_section_header = "detb" in first_col_classes and (cols[0].get('colspan') == '2' or len(cols) < len(column_headers) -1 if column_headers else True)
-        if is_section_header and item_name:
-            all_other_cells_empty = True
-            if len(cols) > 1 and column_headers:
-                if len(cols[1:]) < len(column_headers[1:]): pass
-                else:
-                    for k_idx, _ in enumerate(column_headers[1:]):
-                        if k_idx < len(cols[1:]) and cols[k_idx+1].text.strip() != "": all_other_cells_empty = False; break
-            if all_other_cells_empty:
-                rd = {"Item": item_name}; table_data.append(rd); continue
-        if item_name and column_headers:
-            if len(cols[1:]) == len(column_headers[1:]):
-                vals = [clean_value(c.text) for c in cols[1:]]; rd = {"Item": item_name}
-                for k, v in zip(column_headers[1:], vals): rd[k] = v
-                table_data.append(rd)
-            elif item_name and len(cols) <= 2 and "detb" in first_col_classes:
-                rd = {"Item": item_name}; table_data.append(rd)
-    return table_data, column_headers
 
+        if "Source :" in item_name: 
+            break
+        
+        if not item_name and not any(c.text.replace('\xa0', '').strip() for c in cols[1:] if c.text is not None):
+            continue
+
+        is_section_header = "detb" in first_col_classes and \
+                            (cols[0].get('colspan') == '2' or len(cols) < len(column_headers) -1 if column_headers else True)
+                            
+        if is_section_header and item_name:
+            all_other_cells_empty_or_not_present = True
+            if len(cols) > 1 and column_headers: 
+                if len(cols[1:]) < len(column_headers[1:]): 
+                    pass 
+                else: 
+                    for k_idx, k_col_header in enumerate(column_headers[1:]):
+                        if k_idx < len(cols[1:]) and cols[k_idx+1].text.strip() != "":
+                            all_other_cells_empty_or_not_present = False
+                            break
+            
+            if all_other_cells_empty_or_not_present:
+                row_data = {"Item": item_name}
+                if column_headers: 
+                    for ch in column_headers[1:]:
+                        row_data[ch] = None
+                table_data.append(row_data)
+                continue 
+
+        if item_name and column_headers: 
+            if len(cols[1:]) == len(column_headers[1:]): 
+                values = [clean_value(col.text) for col in cols[1:]]
+                row_data = {"Item": item_name}
+                for k, v in zip(column_headers[1:], values):
+                    row_data[k] = v
+                table_data.append(row_data)
+            elif item_name and len(cols) <= 2 and "detb" in first_col_classes: 
+                row_data = {"Item": item_name}
+                for ch_h in column_headers[1:]: 
+                    row_data[ch_h] = None
+                table_data.append(row_data)
+    return table_data, column_headers
+# --- END OF REPLACEMENT FUNCTION ---
 # --- MODIFIED Function to get sc_id (no proxy argument) ---
 def get_moneycontrol_sc_did_from_api(ticker_query, session): # Removed current_proxies
     params = {'classic': 'true', 'query': ticker_query, 'type': '1', 'format': 'json', 'callback': 'suggest1'}
