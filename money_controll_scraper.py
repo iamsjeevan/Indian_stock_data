@@ -212,7 +212,10 @@ def get_moneycontrol_sc_did_from_api(ticker_query, session): # Removed current_p
 
 
 # --- MODIFIED Main Scraping and Merging Function (no proxy argument) ---
-def scrape_and_save_financials_for_stock(sc_id_to_scrape, original_ticker_name, output_folder_path, session): # Removed current_proxies
+# ... (imports and other functions like clean_value, get_form_params, parse_financial_table_from_soup, get_moneycontrol_sc_did_from_api remain the same) ...
+
+# --- MODIFIED Main Scraping and Merging Function for a SINGLE stock ---
+def scrape_and_save_financials_for_stock(sc_id_to_scrape, original_ticker_name, output_folder_path, session):
     print(f"\n--- Processing Financials for: {original_ticker_name} (using sc_id: {sc_id_to_scrape}) ---")
     all_pages_data_dictionaries = []
     master_year_headers = set()
@@ -223,41 +226,82 @@ def scrape_and_save_financials_for_stock(sc_id_to_scrape, original_ticker_name, 
 
     try:
         print(f"   Fetching initial financial page...")
-        response = session.get(BASE_URL_FINANCIALS, params=initial_params_get, 
-                               timeout=25) # Normal timeout
-                               # proxies=current_proxies REMOVED
-        response.raise_for_status(); current_page_html = response.text; response_obj_for_referer = response
+        response = session.get(BASE_URL_FINANCIALS, params=initial_params_get, timeout=25)
+        response.raise_for_status()
+        current_page_html = response.text
+        response_obj_for_referer = response
     except requests.exceptions.HTTPError as http_err:
-        if response and response.status_code == 404: print(f"   Error 404: Financials page not found for {original_ticker_name} (sc_id: {sc_id_to_scrape}).");
-        else: print(f"   HTTP error initial financials for {original_ticker_name}: {http_err}");
+        if response and response.status_code == 404: 
+            print(f"   Error 404: Financials page not found for {original_ticker_name} (sc_id: {sc_id_to_scrape}).")
+        else: 
+            print(f"   HTTP error fetching initial financials for {original_ticker_name}: {http_err}")
         return False 
     except requests.exceptions.Timeout:
         print(f"   Timeout fetching initial financials for {original_ticker_name}.")
         return False 
-    except requests.RequestException as e: print(f"   Request error initial financials for {original_ticker_name}: {e}"); return False
-    if not current_page_html: print(f"   Failed initial financials for {original_ticker_name}."); return False
+    except requests.RequestException as e: 
+        print(f"   Request error fetching initial financials for {original_ticker_name}: {e}")
+        return False
+    
+    if not current_page_html: 
+        print(f"   Failed to get initial financials page content for {original_ticker_name}.")
+        return False
+
+    # --- NEW CHECK FOR "Data Not Available" ---
+    soup_initial_check = BeautifulSoup(current_page_html, 'lxml')
+    no_data_message = soup_initial_check.find(
+        lambda tag: tag.name == "font" and 
+                    tag.get("color") == "#5b5b5b" and 
+                    tag.get("size") == "3" and 
+                    "Data Not Available" in tag.get_text(strip=True)
+    )
+    # Alternative simpler check based on your HTML structure:
+    # no_data_message = soup_initial_check.find("font", string=re.compile(r"Data Not Available for Standalone Balance Sheet", re.IGNORECASE))
+
+
+    if no_data_message:
+        print(f"   Explicit Message: '{no_data_message.get_text(strip=True)}' found for {original_ticker_name}. No data to process.")
+        # Optionally, create a placeholder file indicating no data
+        no_data_filename = os.path.join(output_folder_path, f"{original_ticker_name}_{REPORT_TYPE}_NO_DATA.txt")
+        try:
+            with open(no_data_filename, "w") as f_no_data:
+                f_no_data.write(f"Moneycontrol page indicated: {no_data_message.get_text(strip=True)}\n")
+                f_no_data.write(f"URL attempted: {response_obj_for_referer.url if response_obj_for_referer else 'N/A'}\n")
+            print(f"   Created placeholder file: {no_data_filename}")
+        except IOError as e_save_no_data:
+            print(f"   Error creating no_data placeholder file: {e_save_no_data}")
+        return False # Treat as a failure to get data, so it's skipped.
+    # --- END OF NEW CHECK ---
 
     page_count = 1
     while page_count <= MAX_PAGES_PER_STOCK:
-        soup = BeautifulSoup(current_page_html, 'lxml')
+        soup = BeautifulSoup(current_page_html, 'lxml') # Parse current page for table
         page_company_name_tag = soup.find('td', class_='det') 
         page_company_name_display = original_ticker_name
         if page_company_name_tag and page_company_name_tag.b: page_company_name_display = page_company_name_tag.b.text.strip()
         elif page_company_name_tag: page_company_name_display = page_company_name_tag.text.strip()
+        
         page_table_data, page_headers = parse_financial_table_from_soup(soup, page_company_name_display, str(page_count))
-        if not page_table_data and page_count == 1:
-            print(f"   No table data found on the first financial page for {original_ticker_name}. This sc_id might be incorrect for financials.")
+        
+        if not page_table_data and page_count == 1: # No table data found on the first page (after "No Data" check)
+            print(f"   No parseable table data found on the first financial page for {original_ticker_name} (after 'No Data' check). sc_id might be incorrect or page structure is different.")
             return False 
+        
         if page_table_data:
             if page_headers and len(page_headers) > 1:
                 for header in page_headers[1:]:
-                    if header.startswith("Mar "): master_year_headers.add(header)
+                    if header.startswith("Mar ") or header.startswith("Dec ") or header.startswith("Sep ") or header.startswith("Jun "): # Make sure to match your parser's flexibility
+                        master_year_headers.add(header)
             all_pages_data_dictionaries.extend(page_table_data)
         
         prev_years_link = soup.find('a', onclick=lambda x: x and "post_prevnext('2')" in x)
-        if prev_years_link and response_obj_for_referer:
-            form_params = get_form_params(soup)
-            if not form_params: break 
+        # Also check if pagination form fields make sense (e.g., start_year is not empty)
+        form_params_for_check = get_form_params(soup)
+        can_paginate = prev_years_link and response_obj_for_referer and form_params_for_check and form_params_for_check.get('start_year')
+
+        if can_paginate:
+            form_params = form_params_for_check # Use the already fetched form_params
+            if not form_params: break # Should not happen if can_paginate is true based on form_params_for_check
             form_params['nav'] = 'next' 
             post_referer = response_obj_for_referer.url
             post_financials_headers = HEADERS_FINANCIALS.copy()
@@ -266,9 +310,7 @@ def scrape_and_save_financials_for_stock(sc_id_to_scrape, original_ticker_name, 
             time.sleep(REQUEST_DELAY)
             try:
                 print(f"   Fetching next financial page (POST)...")
-                response = session.post(BASE_URL_FINANCIALS, data=form_params, headers=post_financials_headers, 
-                                        timeout=25) # Normal timeout
-                                        # proxies=next_page_proxies REMOVED
+                response = session.post(BASE_URL_FINANCIALS, data=form_params, headers=post_financials_headers, timeout=25)
                 response.raise_for_status(); current_page_html = response.text; response_obj_for_referer = response; page_count += 1
             except requests.exceptions.Timeout:
                 print(f"      Timeout fetching next financials page (POST) for {original_ticker_name}.")
@@ -277,6 +319,7 @@ def scrape_and_save_financials_for_stock(sc_id_to_scrape, original_ticker_name, 
                 print(f"      Error next financials page (POST) for {original_ticker_name}: {e}")
                 request_successful = False; break 
         else:
+            # print(f"   No 'Previous Years' link or invalid form for pagination for {original_ticker_name}. Ending pagination.") # Optional debug
             break 
             
     if not request_successful: 
@@ -284,32 +327,47 @@ def scrape_and_save_financials_for_stock(sc_id_to_scrape, original_ticker_name, 
         return False 
 
     if not all_pages_data_dictionaries: 
-        print(f"   No financial data collected after pagination for {original_ticker_name} (sc_id: {sc_id_to_scrape}).")
+        print(f"   No financial data collected after pagination attempts for {original_ticker_name} (sc_id: {sc_id_to_scrape}).")
         return False
 
-    try: # Merging and saving logic remains the same
+    # --- Merging and Saving Logic (remains the same) ---
+    try:
         merged_items_data = {}
         for row_dict in all_pages_data_dictionaries:
             item_name = row_dict.get("Item")
             if not item_name: continue
             if item_name not in merged_items_data: merged_items_data[item_name] = {"Item": item_name}
             for key, value in row_dict.items():
-                if key.startswith("Mar ") and value is not None:
+                if re.match(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s\d{2}$", key) and value is not None: # Check if key is a year header
                     if merged_items_data[item_name].get(key) is None or value is not None: merged_items_data[item_name][key] = value
-                elif key != "Item" and value is not None :
+                elif key != "Item" and value is not None : # For other potential non-year columns
                     if merged_items_data[item_name].get(key) is None: merged_items_data[item_name][key] = value
+        
         final_merged_list = list(merged_items_data.values())
-        if not final_merged_list: print(f"   Merged data is empty for {original_ticker_name}. Not saving CSV."); return False
+        if not final_merged_list: 
+            print(f"   Merged data is empty for {original_ticker_name}. Not saving CSV.")
+            return False
+            
+        # Ensure master_year_headers are used for sorting and final columns
         sorted_year_headers = sorted(list(master_year_headers), reverse=True)
         final_ordered_columns = ["Item"] + sorted_year_headers
-        all_collected_keys = set(); [all_collected_keys.update(item_data.keys()) for item_data in final_merged_list]
-        other_columns = [key for key in all_collected_keys if key not in final_ordered_columns]
+        
+        # Add any other collected columns that are not "Item" or a year header
+        all_collected_keys_in_merge = set()
+        for item_data in final_merged_list: 
+            all_collected_keys_in_merge.update(item_data.keys())
+        other_columns = [key for key in all_collected_keys_in_merge if key not in final_ordered_columns]
         final_ordered_columns.extend(other_columns)
+        
         df = pd.DataFrame(final_merged_list)
         for col in final_ordered_columns: 
-            if col not in df.columns: df[col] = pd.NA
-        df = df[final_ordered_columns] 
-        if df.empty or len(df.columns) <= 1 : print(f"   Merged DataFrame is empty for {original_ticker_name}. Not saving CSV."); return False
+            if col not in df.columns: df[col] = pd.NA # Add missing columns with NA
+        df = df[final_ordered_columns] # Enforce order and include all relevant columns
+        
+        if df.empty or len(df.columns) <= 1 : 
+            print(f"   Merged DataFrame is empty or has no data columns for {original_ticker_name}. Not saving CSV.")
+            return False
+            
         csv_filename = f"{original_ticker_name}_{REPORT_TYPE}_merged_financials.csv"
         csv_filepath = os.path.join(output_folder_path, csv_filename)
         df.to_csv(csv_filepath, index=False, encoding='utf-8-sig')
@@ -317,9 +375,7 @@ def scrape_and_save_financials_for_stock(sc_id_to_scrape, original_ticker_name, 
         return True 
     except Exception as e:
         print(f"   Error during data merging or CSV saving for {original_ticker_name}: {e}")
-        return False 
-
-
+        return False
 # --- MODIFIED Function to iterate through stock folders ---
 def process_stock_folders(main_data_folder, stocks_to_process_tickers=None):
     if not os.path.isdir(main_data_folder): print(f"Error: Main data folder '{main_data_folder}' does not exist."); return
