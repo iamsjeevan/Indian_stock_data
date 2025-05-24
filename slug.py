@@ -16,7 +16,7 @@ def fetch_all_slugs():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/javascript, */*; q=0.01', # More generic accept
         'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.financialexpress.com/about/',
+        'Referer': '/',
         'X-Requested-With': 'XMLHttpRequest'
     }
 
